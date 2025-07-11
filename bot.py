@@ -1,10 +1,10 @@
+import os
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
 
-# 你的 API Key 和 Bot Token
-API_KEY = "65a406eff0902aadd436f939"
-BOT_TOKEN = "7811557176:AAFK8O3c3Z5RqjV32r1PkpV_esoTwviXEC8"
+API_KEY = os.environ["API_KEY"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
@@ -31,4 +31,3 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.run_polling()
-

@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 
 # 配置常量
 BUTTONS = [
-    ["🧾 开始记账", "📈 点位对比", "💹 实时U价汇率"],
-    ["💰 地址查询", "🤝 交易查询", "💎 代开TG会员"],
+    ["🧾 开始记账", "📈 点位对比", "💹 实时U价"],
+    ["💰 地址查询", "🤝 交易查询", "💎 代开会员"],
     ["📥 商务联系", "📖 使用说明", "📊 互转分析"],
 ]
 
@@ -60,12 +60,18 @@ COMMANDS = [
     BotCommand("checkgroup", "查看群组信息和类型"),
 ]
 
-REQUIRED_GROUP_ID = -1002615680129  # 你的超级群ID（注意负号）
-REQUIRED_GROUP_LINK = "https://t.me/LightningPayCG"
+# 支持多个群组和频道，用户需加入任意一个才视为激活
+REQUIRED_CHAT_IDS = [-1002615680129, -1002739279735]  # 群组ID和频道ID
+REQUIRED_CHAT_LINKS = [
+    "https://t.me/LightningPayCG",
+    "https://t.me/LightningPayGC",
+]
 TRIAL_HOURS = 24
 
-# 试用数据文件
 TRIAL_DATA_FILE = "trial_data.json"
+
+def format_required_chat_links():
+    return "\n".join(REQUIRED_CHAT_LINKS)
 
 # 地址校验
 def is_valid_address(text: str) -> bool:
@@ -96,7 +102,7 @@ class AdminCache:
 
 admin_cache = AdminCache()
 
-# --- 试用文件存储相关函数 ---
+# 试用数据文件操作
 def load_trial_data():
     if not os.path.exists(TRIAL_DATA_FILE):
         return {}
@@ -139,28 +145,19 @@ def remove_trial_file(user_id):
         save_trial_data(data)
         logger.info(f"用户{user_id}试用记录已移除")
 
-# --- 检查用户是否在群组 ---
-async def check_user_membership(bot, user_id: int) -> bool:
-    try:
-        chat = await bot.get_chat(REQUIRED_GROUP_ID)
-        if chat.type != "supergroup":
-            return False
-        member = await bot.get_chat_member(REQUIRED_GROUP_ID, user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except Exception as e:
-        logger.warning(f"查询用户{user_id}超级群成员状态失败: {e}")
-        return False
-
+# 多聊天检测激活
 async def is_user_activated(bot, user_id: int) -> bool:
-    """已激活即为永久使用权限"""
-    # 激活判断用文件缓存或可改进为持久存储，这里简化为群组判断
-    in_group = await check_user_membership(bot, user_id)
-    if in_group:
-        remove_trial_file(user_id)  # 激活后清除试用记录
-        return True
+    for chat_id in REQUIRED_CHAT_IDS:
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+            if member.status in ["member", "administrator", "creator"]:
+                remove_trial_file(user_id)
+                return True
+        except Exception as e:
+            logger.warning(f"查询用户{user_id}在群/频道{chat_id}成员状态失败: {e}")
     return False
 
-# --- 访问权限检查 ---
+# 访问权限检查
 async def check_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user_id = update.effective_user.id
     bot = context.bot
@@ -175,11 +172,10 @@ async def check_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bo
 
     await update.message.reply_text(
         f"⏳ 您正在使用24小时免费试用期。\n"
-        f"试用结束后请加入群组以继续使用机器人：\n{REQUIRED_GROUP_LINK}"
+        f"试用结束后请加入以下群组或频道以继续使用机器人：\n{format_required_chat_links()}"
     )
     return False
 
-# 状态映射
 STATE_HANDLERS = {
     "awaiting_price_compare": handle_price_compare,
     "awaiting_exchange_currency": handle_exchange_rate_input,
@@ -187,7 +183,6 @@ STATE_HANDLERS = {
     "awaiting_tx_addresses": handle_transaction_input,
 }
 
-# --- 核心功能函数 ---
 async def is_user_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     chat = update.effective_chat
     user = update.effective_user
@@ -233,8 +228,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await handle_bookkeeping_start_safe(update, context)
             return
 
-        if chat_type == "private":
-            if not await check_access(update, context):
+        bot = context.bot
+        activated = await is_user_activated(bot, user_id)
+        trial = is_trial_valid_file(user_id)
+
+        # 试用期结束且未激活，限制除「商务联系」和「代开会员」外其他按钮
+        if not activated and not trial:
+            allowed_buttons = {"📥 商务联系", "💎 代开会员"}
+            if text not in allowed_buttons:
+                await update.message.reply_text(
+                    f"⚠️ 您的试用期已结束，请加入以下群组或频道才能使用此功能：\n{format_required_chat_links()}"
+                )
                 return
 
         if text in BUTTON_TEXTS:
@@ -251,7 +255,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        if text == "💹 实时U价汇率":
+        if text == "💹 实时U价":
             await handle_exchange_rate(update, context)
             return
 
@@ -266,7 +270,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_transaction(update, context)
             return
 
-        if text == "💎 代开TG会员":
+        if text == "💎 代开会员":
             await handle_premium_info(update, context)
             return
 
@@ -334,7 +338,6 @@ async def set_commands(app):
     except Exception as e:
         logger.error(f"set_commands异常: {e}")
 
-# 查询状态命令
 async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     bot = context.bot
@@ -343,21 +346,25 @@ async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         trial = is_trial_valid_file(user_id)
         msg = []
         if activated:
-            msg.append("✅ 您已通过加入群组激活，功能无限制。")
+            msg.append("✅ 您已通过加入群组或频道激活，功能无限制。")
         elif trial:
             msg.append("⏳ 您当前处于24小时免费试用期内。")
         else:
-            msg.append(f"⏳ 您的试用期已结束。\n请加入群组 {REQUIRED_GROUP_LINK} 以继续使用机器人。")
+            msg.append(
+                f"⏳ 您的试用期已结束。\n请加入以下群组或频道 {format_required_chat_links()} 以继续使用机器人。"
+            )
         await update.message.reply_text("\n".join(msg))
     except Exception as e:
         logger.error(f"handle_status异常: {e}")
         await update.message.reply_text("查询状态时发生错误，请稍后再试。")
 
-# 查询群组信息命令
 async def check_group_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        chat = await context.bot.get_chat(REQUIRED_GROUP_ID)
-        await update.message.reply_text(f"群组名称：{chat.title}\n群组类型：{chat.type}")
+        chats = []
+        for chat_id in REQUIRED_CHAT_IDS:
+            chat = await context.bot.get_chat(chat_id)
+            chats.append(f"{chat.title} ({chat.type})")
+        await update.message.reply_text(f"群组/频道信息：\n" + "\n".join(chats))
     except Exception as e:
         await update.message.reply_text(f"获取群组信息失败：{e}")
 

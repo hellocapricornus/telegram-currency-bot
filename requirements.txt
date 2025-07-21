@@ -1,7 +1,0 @@
-python-telegram-bot>=20.3
-aiohttp>=3.8.1
-telegram
-binpan
-python-dotenv
-redis
-python-dateutil

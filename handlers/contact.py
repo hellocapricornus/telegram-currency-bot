@@ -55,30 +55,28 @@ async def handle_contact_input(update: Update, context: ContextTypes.DEFAULT_TYP
     txs1 = await fetch_all_trc20_transfers(addr1)
     txs2 = await fetch_all_trc20_transfers(addr2)
 
-    # 统计每个地址与addr1的交互次数（from/to中除去addr1）
+    # 统计每个地址与 addr1 的交互次数（from/to中除去 addr1）
     counter1 = {}
     for tx in txs1:
-        frm = tx.get("from_address", "").lower()
-        to = tx.get("to_address", "").lower()
-        addr1_lower = addr1.lower()
+        frm = tx.get("from_address", "")
+        to = tx.get("to_address", "")
         other = None
-        if frm == addr1_lower:
+        if frm == addr1:
             other = to
-        elif to == addr1_lower:
+        elif to == addr1:
             other = frm
         if other:
             counter1[other] = counter1.get(other, 0) + 1
 
-    # 同理统计addr2
+    # 同理统计 addr2
     counter2 = {}
     for tx in txs2:
-        frm = tx.get("from_address", "").lower()
-        to = tx.get("to_address", "").lower()
-        addr2_lower = addr2.lower()
+        frm = tx.get("from_address", "")
+        to = tx.get("to_address", "")
         other = None
-        if frm == addr2_lower:
+        if frm == addr2:
             other = to
-        elif to == addr2_lower:
+        elif to == addr2:
             other = frm
         if other:
             counter2[other] = counter2.get(other, 0) + 1
@@ -93,12 +91,14 @@ async def handle_contact_input(update: Update, context: ContextTypes.DEFAULT_TYP
 
     lines = ["🔎 发现共同地址及与两地址的转账次数："]
     for ca in common_addresses:
+        # 将地址转换为可点击链接，保持原始大小写
+        ca_link = f"<a href='https://tronscan.org/#/address/{ca}'>[{ca}]</a>"
         lines.append(
-            f"{ca}\n"
+            f"{ca_link}\n"
             f"  与地址一交互次数: {counter1[ca]}\n"
             f"  与地址二交互次数: {counter2[ca]}\n"
             "--------------------------"
         )
 
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n".join(lines), parse_mode='HTML')
     context.user_data.clear()

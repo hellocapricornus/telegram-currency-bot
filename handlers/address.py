@@ -70,15 +70,14 @@ async def query_transfer_records_tron(address, start=0, limit=PAGE_SIZE):
 
 def format_transfer_records(transfers, address):
     lines = []
-    addr_lower = address.lower()
     for tr in transfers:
         ts = tr.get("block_ts", 0) // 1000
         time_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
-        from_addr = tr.get("from_address", "").lower()
-        to_addr = tr.get("to_address", "").lower()
+        from_addr = tr.get("from_address", "")
+        to_addr = tr.get("to_address", "")
 
-        direction = "⬅ 收到" if to_addr == addr_lower else "➡ 发出"
+        direction = "⬅ 收到" if to_addr == address else "➡ 发出"
         other_addr = from_addr if direction == "⬅ 收到" else to_addr
 
         quant = int(tr.get("quant", 0))
@@ -89,12 +88,15 @@ def format_transfer_records(transfers, address):
         symbol = token_info.get("tokenAbbr", "TOKEN")
         label = LABELS.get(symbol, "其他")
 
+        # 将地址本身变为超链接，并保持原始大小写格式
+        other_addr_link = f"<a href='https://tronscan.org/#/address/{other_addr}'>[{other_addr}]</a>"
+
         lines.append(
-            f"{time_str} {direction} {amount:.6f} {symbol}（{label}）\n对方地址：{other_addr}"
+            f"{time_str} {direction} {amount:.6f} {symbol}（{label}）\n"
+            f"对方地址：{other_addr_link}"
         )
 
     return "\n\n".join(lines) if lines else "无转账记录"
-
 
 async def query_resource(address):
     url = "https://api.trongrid.io/wallet/getAccountResource"
@@ -124,10 +126,10 @@ async def send_transfer_records(update, context, address, start):
     reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
 
     if update.callback_query:
-        await update.callback_query.edit_message_text(text=text, reply_markup=reply_markup)
+        await update.callback_query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode='HTML')
         await update.callback_query.answer()
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup)
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='HTML')
 
 
 async def handle_address_input(update: Update, context: ContextTypes.DEFAULT_TYPE):

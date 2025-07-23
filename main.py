@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from handlers import usage_guide
-from handlers import anti_ads
+from handlers import anti_ads #广告拦截
 from telegram import (
     ReplyKeyboardMarkup,
     InlineKeyboardButton,#新加

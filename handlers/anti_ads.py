@@ -3,6 +3,7 @@
 import re
 from telegram import Update
 from telegram.ext import ContextTypes
+from telegram.constants import ChatMemberStatus
 
 # 广告关键词正则
 AD_PATTERNS = [
@@ -12,6 +13,10 @@ AD_PATTERNS = [
 ]
 AD_REGEX = re.compile("|".join(AD_PATTERNS), flags=re.IGNORECASE)
 
+# 设置频道ID与提示信息
+REQUIRED_CHANNEL_ID = -1002739279735
+REQUIRED_CHANNEL_LINK = "https://t.me/LightningPayGC"
+
 def is_group(update: Update) -> bool:
     return update.effective_chat.type in ["group", "supergroup"]
 
@@ -20,11 +25,8 @@ async def detect_and_delete_ads(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.effective_user
     chat = update.effective_chat
 
-    # 只处理群组消息
-    if not is_group(update):
-        return
-
-    if not message or not message.text:
+    # 非群组消息忽略
+    if not chat.type.endswith("group") or not message or not message.text:
         return
 
     # 忽略管理员或群主
@@ -36,6 +38,26 @@ async def detect_and_delete_ads(update: Update, context: ContextTypes.DEFAULT_TY
         print(f"[获取成员信息失败] {e}")
         return
 
+    # 检查是否关注频道
+    try:
+        channel_member = await context.bot.get_chat_member(REQUIRED_CHANNEL_ID, user.id)
+        if channel_member.status == ChatMemberStatus.LEFT:
+            await message.delete()
+            await context.bot.send_message(
+                chat_id=chat.id,
+                text=f"⚠️ @{user.username or user.full_name}，请先关注频道：{REQUIRED_CHANNEL_LINK} 才能在本群发言。"
+            )
+            return
+    except Exception as e:
+        print(f"[检查频道关注状态失败] {e}")
+        # 异常时也默认删除，防止绕过
+        await message.delete()
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=f"⚠️ @{user.username or user.full_name}，请先关注频道：{REQUIRED_CHANNEL_LINK} 才能在本群发言。"
+        )
+        return
+        
     # 匹配广告关键词
     match = AD_REGEX.search(message.text)
     if match:

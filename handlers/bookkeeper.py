@@ -20,6 +20,7 @@ bookkeeping_data = {}
 HISTORY_DIR = "data/bills"
 os.makedirs(HISTORY_DIR, exist_ok=True)
 
+
 # 判断是否是管理员或操作人
 # 修改为异步函数
 # 判断是否是管理员或操作人（改为async，且统一小写匹配）
@@ -408,13 +409,20 @@ async def handle_set_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin_or_operator(update, context):
         return
 
-    if bookkeeping_data.get(chat_id, {}).get("rate") is not None and bookkeeping_data[chat_id].get("active"):
-        await update.message.reply_text("❌ 当前已启用记账，无法更改汇率。请先保存或结束记账。")
-        return
-
     rate = float(match.group(1))
-    bookkeeping_data.setdefault(chat_id, {}).update({"rate": rate})
-    await update.message.reply_text(f"✅ 汇率已设置为 {rate:.2f}")
+    group_data = bookkeeping_data.setdefault(chat_id, {})
+    previously_set = "rate" in group_data and group_data["rate"] is not None
+    group_data.update({"rate": rate})
+
+    if group_data.get("active") and previously_set:
+        await update.message.reply_text(f"✅ 汇率已设置为 {rate:.2f}（已影响当前记账）")
+    else:
+        await update.message.reply_text(f"✅ 汇率已设置为 {rate:.2f}（当前记账已立即生效）")
+
+    # 设置后显示摘要（仅在已启用记账时）
+    if group_data.get("active"):
+        await render_summary(update, context)
+
 
 
 # 设置费率
@@ -429,13 +437,19 @@ async def handle_set_fee(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin_or_operator(update, context):
         return
 
-    if bookkeeping_data.get(chat_id, {}).get("fee") is not None and bookkeeping_data[chat_id].get("active"):
-        await update.message.reply_text("❌ 当前已启用记账，无法更改费率。请先保存或结束记账。")
-        return
-
     fee = float(match.group(1))
-    bookkeeping_data.setdefault(chat_id, {}).update({"fee": fee})
-    await update.message.reply_text(f"✅ 费率已设置为 {fee:.2f}%")
+    group_data = bookkeeping_data.setdefault(chat_id, {})
+    previously_set = "fee" in group_data and group_data["fee"] is not None
+    group_data.update({"fee": fee})
+
+    if group_data.get("active") and previously_set:
+        await update.message.reply_text(f"✅ 费率已设置为 {fee:.2f}%（已影响当前记账）")
+    else:
+        await update.message.reply_text(f"✅ 费率已设置为 {fee:.2f}%（当前记账已立即生效）")
+
+    # 设置后显示摘要（仅在已启用记账时）
+    if group_data.get("active"):
+        await render_summary(update, context)
 
 
 # 添加操作人

@@ -525,7 +525,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, update_group_info))
 
     #关键词屏蔽
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), anti_ads.detect_and_delete_ads))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), anti_ads.detect_and_delete_ads), group=2)
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_message_listener), group=0)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1)

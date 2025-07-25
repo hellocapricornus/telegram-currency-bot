@@ -13,7 +13,8 @@ from telegram import (
     InlineKeyboardMarkup,#新加
     Update,
     BotCommand,
-)
+) 
+
 from telegram.constants import ChatMemberStatus
 from telegram.ext import (
     ApplicationBuilder,
@@ -50,6 +51,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 ADMIN_ID = 7596698993 #新加
+GROUP_FILE = "data/groups.json"
 
 # 配置常量
 BUTTONS = [
@@ -95,51 +97,58 @@ async def handle_list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = []
     for group_id, group in groups.items():
-        keyboard.append([InlineKeyboardButton(group["title"], callback_data=f"select_group:{group_id}")])
+        row = [
+            InlineKeyboardButton(group["title"], callback_data=f"select_group:{group_id}"),
+            InlineKeyboardButton("🗑 删除", callback_data=f"delete_group:{group_id}")
+        ]
+        keyboard.append(row)
 
-    await update.message.reply_text("📂 请选择要查询的群组：", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("📂 请选择群组或删除记录：", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def handle_group_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_group_users_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()  # 回应回调，防止客户端loading一直转
+    await query.answer()
 
     data = query.data
-    if not data.startswith("select_group:"):
-        return
+    if data.startswith("select_group:"):
+        group_id = data.split(":", 1)[1]
+        groups = load_groups()
+        group = groups.get(group_id)
+        if not group:
+            await query.edit_message_text("⚠️ 群组信息不存在")
+            return
 
-    group_id = data.split(":", 1)[1]
-    groups = load_groups()
-    group = groups.get(group_id)
-    if not group:
-        await query.edit_message_text("⚠️ 群组信息不存在")
-        return
+        try:
+            admins = await context.bot.get_chat_administrators(group_id)
+            text_lines = [
+                f"✅ 群组名称：{group['title']}",
+                f"🆔 群组 ID：{group_id}",
+                "",
+                "管理员列表："
+            ]
+            for admin in admins:
+                user = admin.user
+                name = user.full_name
+                if user.username:
+                    name += f" (@{user.username})"
+                text_lines.append(f"👤 {name}")
 
-    try:
-        # 异步获取该群组的管理员列表
-        admins = await context.bot.get_chat_administrators(group_id)
+            await query.edit_message_text("\n".join(text_lines))
 
-        text_lines = [
-            f"✅ 群组名称：{group['title']}",
-            f"🆔 群组 ID：{group_id}",
-            "",
-            "管理员列表："
-        ]
+        except Exception as e:
+            await query.edit_message_text(f"⚠️ 获取管理员列表失败：{e}")
 
-        for admin in admins:
-            user = admin.user
-            name = user.full_name
-            if user.username:
-                name += f" (@{user.username})"
-            text_lines.append(f"👤 {name}")
+    elif data.startswith("delete_group:"):
+        group_id = data.split(":", 1)[1]
+        groups = load_groups()
 
-        text = "\n".join(text_lines)
-
-        # 只调用一次编辑接口，发送完整文本
-        await query.edit_message_text(text)
-
-    except Exception as e:
-        # 出错时给出错误提示
-        await query.edit_message_text(f"⚠️ 获取管理员列表失败：{e}")
+        if group_id in groups:
+            del groups[group_id]
+            with open(GROUP_FILE, "w", encoding="utf-8") as f:
+                json.dump(groups, f, ensure_ascii=False, indent=2)
+            await query.edit_message_text(f"✅ 已删除群组记录：{group_id}")
+        else:
+            await query.edit_message_text("⚠️ 群组不存在或已被删除")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -455,7 +464,7 @@ def main():
 
     # help机器人
     app.add_handler(CommandHandler("help", handle_help))
-    
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("list_users", handle_list_users))
     app.add_handler(CommandHandler("help", help_command))
@@ -512,13 +521,16 @@ def main():
 
         # 机器人被踢出群组监听
     app.add_handler(ChatMemberHandler(bookkeeper.handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER))
+    # 监听所有群组中的非命令消息，记录群组信息
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, update_group_info))
 
     #关键词屏蔽
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), anti_ads.detect_and_delete_ads))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_message_listener), group=0)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1)
-    app.add_handler(CallbackQueryHandler(handle_group_selection, pattern=r"^select_group:"))
+    app.add_handler(CallbackQueryHandler(handle_group_users_callback, pattern=r"^(select_group|delete_group):"))
+
     app.add_handler(CallbackQueryHandler(callback_query_handler))
 
 

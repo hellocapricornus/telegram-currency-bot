@@ -26,11 +26,10 @@ async def detect_and_delete_ads(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.effective_user
     chat = update.effective_chat
 
-    # 仅处理群组消息，忽略私聊等
+
     if not chat.type.endswith("group") or not message or not message.text:
         return
 
-    # 忽略管理员和群主
     try:
         member = await context.bot.get_chat_member(chat.id, user.id)
         if member.status in ["administrator", "creator"]:
@@ -39,35 +38,41 @@ async def detect_and_delete_ads(update: Update, context: ContextTypes.DEFAULT_TY
         print(f"[获取成员信息失败] {e}")
         return
 
-    # 👉 若是指定群组，才检查是否关注频道
     if chat.id == REQUIRED_CHANNEL_GROUP_ID:
         try:
             channel_member = await context.bot.get_chat_member(REQUIRED_CHANNEL_ID, user.id)
-            if channel_member.status == ChatMemberStatus.LEFT:
+            if channel_member.status not in [
+                ChatMemberStatus.MEMBER,
+                ChatMemberStatus.ADMINISTRATOR,
+                ChatMemberStatus.OWNER,
+            ]:
                 await message.delete()
+                name = f"@{user.username}" if user.username else user.full_name
                 await context.bot.send_message(
                     chat_id=chat.id,
-                    text=f"⚠️ @{user.username or user.full_name}，请先关注频道：{REQUIRED_CHANNEL_LINK} 才能在本群发言。"
+                    text=f"⚠️ {name}，请先关注频道：{REQUIRED_CHANNEL_LINK} 才能在本群发言。"
                 )
                 return
         except Exception as e:
             print(f"[检查频道关注状态失败] {e}")
             await message.delete()
+            name = f"@{user.username}" if user.username else user.full_name
             await context.bot.send_message(
                 chat_id=chat.id,
-                text=f"⚠️ @{user.username or user.full_name}，请先关注频道：{REQUIRED_CHANNEL_LINK} 才能在本群发言。"
+                text=f"⚠️ {name}，请先关注频道：{REQUIRED_CHANNEL_LINK} 才能在本群发言。"
             )
             return
 
-    # 🚫 匹配广告关键词（全群组适用）
+    # 检测广告关键词
     match = AD_REGEX.search(message.text)
     if match:
         keyword = match.group(0)
         try:
             await message.delete()
+            name = f"@{user.username}" if user.username else str(user.id)
             await context.bot.send_message(
                 chat_id=chat.id,
-                text=f"🚫 @{user.username or user.id} 的消息包含违规词「{keyword}」，已删除。\n请勿发布广告、推广、加群等内容。",
+                text=f"🚫 {name} 的消息包含违规词「{keyword}」，已删除。\n请勿发布广告、推广、加群等内容。",
             )
         except Exception as e:
             print(f"[广告删除失败] {e}")

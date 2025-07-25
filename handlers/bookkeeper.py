@@ -9,16 +9,59 @@ from telegram import (
     InlineKeyboardButton,
     ChatMemberUpdated,
 )
-from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ChatMemberHandler,
+    ContextTypes,
+    filters,
+)
 from telegram.constants import ChatMemberStatus
+
+# 初始化目录
+HISTORY_DIR = "data/bills"
+CACHE_DIR = "data/cache"
+os.makedirs(HISTORY_DIR, exist_ok=True)
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 # 群组独立账本缓存，格式：chat_id -> {active, in, out, rate, fee, operator_usernames}
 bookkeeping_data = {}
 
-# 历史账单存储路径
-HISTORY_DIR = "data/bills"
-os.makedirs(HISTORY_DIR, exist_ok=True)
+# ----- 缓存文件操作 -----
+def get_cache_path(chat_id):
+    return os.path.join(CACHE_DIR, f"{chat_id}.json")
+
+def save_cache(chat_id):
+    data = bookkeeping_data.get(chat_id)
+    if data is None:
+        # 删除缓存文件（如果没有数据了）
+        path = get_cache_path(chat_id)
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    path = get_cache_path(chat_id)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def load_cache(chat_id):
+    path = get_cache_path(chat_id)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+def load_all_caches():
+    bookkeeping_data.clear()
+    for f in os.listdir(CACHE_DIR):
+        if f.endswith(".json"):
+            cid_str = f[:-5]
+            if cid_str.isdigit():
+                cid = int(cid_str)
+                data = load_cache(cid)
+                if data:
+                    bookkeeping_data[cid] = data
 
 
 # 判断是否是管理员或操作人
@@ -175,19 +218,25 @@ async def handle_payout_correction(update: Update, context: ContextTypes.DEFAULT
         return
 
     text = update.message.text.strip()
-    match = re.match(r"^下发-?(\d+(\.\d{1,2})?)([Uu])?$", text)
+
+    match = re.match(r"^(下发)?-?(\d+(\.\d{1,2})?)([Uu])?$", text)
     if not match:
         return
 
-    amount = float(match.group(1))
-    has_u = match.group(3) is not None
+    amount = float(match.group(2))
+    has_u = match.group(4) is not None
 
     rate = bookkeeping_data[chat_id].get("rate")
     fee = bookkeeping_data[chat_id].get("fee")
 
+    if rate is None or fee is None:
+        await update.message.reply_text("请先设置费率和汇率（设置费率5%、设置汇率100）")
+        return
+
     time_str = datetime.now().strftime("%H:%M:%S")
 
     if has_u:
+        # ✅ 通过 USDT 修正，先计算原币种金额
         coin_amount = amount * rate / (1 - fee / 100)
         bookkeeping_data[chat_id]["out"].append({
             "time": time_str,
@@ -196,10 +245,11 @@ async def handle_payout_correction(update: Update, context: ContextTypes.DEFAULT
             "is_usdt": True
         })
     else:
+        # ✅ 修正的是原币种金额
         bookkeeping_data[chat_id]["out"].append({
             "time": time_str,
             "amount": -amount,
-            "usdt_amount": -amount * (1 - fee / 100) / rate if rate else 0,
+            "usdt_amount": -amount * (1 - fee / 100) / rate,
             "is_usdt": False
         })
 
@@ -551,21 +601,23 @@ async def render_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("\n".join(lines), reply_markup=keyboard)
 
-
-
-# 监听机器人被移出群组事件，自动清除缓存账单
 async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_member_update: ChatMemberUpdated = update.chat_member
-    chat = chat_member_update.chat
+    chat_member_update = update.my_chat_member
+    if not chat_member_update:
+        context.application.logger.warning("handle_bot_removed: update.my_chat_member is None")
+        return
+
     old_status = chat_member_update.old_chat_member.status
     new_status = chat_member_update.new_chat_member.status
-
     bot_id = context.bot.id
 
-    # 判断是否机器人被移出群组
+    context.application.logger.info(f"handle_bot_removed triggered for chat {chat_member_update.chat.id}")
+
     if chat_member_update.new_chat_member.user.id == bot_id:
-        if old_status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER] and new_status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED]:
-            chat_id = chat.id
+        if old_status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER] and \
+           new_status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED]:
+
+            chat_id = chat_member_update.chat.id
             # 删除缓存账单
             if chat_id in bookkeeping_data:
                 del bookkeeping_data[chat_id]
@@ -578,4 +630,4 @@ async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     except Exception as e:
                         context.application.logger.error(f"删除群组账单文件失败: {f} 错误: {e}")
 
-            context.application.logger.info(f"机器人被移出群组 {chat.title}({chat_id})，清除对应账单缓存和历史账单。")
+            context.application.logger.info(f"机器人被移出群组 {chat_member_update.chat.title}({chat_id})，清除对应账单缓存和历史账单。")

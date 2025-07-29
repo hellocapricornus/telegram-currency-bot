@@ -16,7 +16,7 @@ AD_REGEX = re.compile("|".join(AD_PATTERNS), flags=re.IGNORECASE)
 # 仅群组 2615680129 需要关注频道
 REQUIRED_CHANNEL_GROUP_ID = -1002615680129
 REQUIRED_CHANNEL_ID = -1002739279735
-REQUIRED_CHANNEL_LINK = "https://t.me/LightningPayGC"
+REQUIRED_CHANNEL_LINK = "https://t.me/VEXEGX"
 
 def is_group(update: Update) -> bool:
     return update.effective_chat.type in ["group", "supergroup"]

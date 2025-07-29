@@ -159,6 +159,48 @@ async def group_message_listener(update: Update, context: ContextTypes.DEFAULT_T
         logger.info(f"收到消息：chat_id={update.message.chat.id} user_id={update.effective_user.id} text={update.message.text}")
         await update_group_info(update)
 
+# 全局缓存用户的最后一次昵称
+last_names = {}
+
+# 监听成员状态变化，主要用于新用户加入或状态变更时更新昵称缓存
+async def handle_name_change(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("handle_name_change triggered")
+    if not update.chat_member:
+        return
+
+    new_user = update.chat_member.new_chat_member.user
+    chat_id = update.chat_member.chat.id
+
+    # 缓存昵称
+    last_names[(chat_id, new_user.id)] = new_user.full_name
+
+# 监听群组消息，检测用户昵称变化
+async def detect_name_change_in_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+
+    old_name = last_names.get((chat_id, user.id))
+    new_name = user.full_name
+
+    # 检测昵称是否变化
+    if old_name and old_name != new_name:
+        message = (
+            "⚠️⚠️⚠️成员更新⚠️⚠️⚠️\n\n"
+            f"🆔 用户ID：`{user.id}`\n"
+            f"🚺 修改前叫：{old_name}\n"
+            f"🚹 修改后叫：{new_name}\n"
+            f"👹 用户名：{user.username or '无'}"
+        )
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
+        except Exception as e:
+            # 记录异常日志，防止程序崩溃
+            logging.error(f"发送昵称变更消息失败: {e}")
+
+    # 更新缓存为当前昵称
+    last_names[(chat_id, user.id)] = new_name
+
+        
 # 地址校验
 def is_valid_address(text: str) -> bool:
     pattern = r"^(T[1-9A-HJ-NP-Za-km-z]{33}|0x[a-fA-F0-9]{40})$"
@@ -521,19 +563,23 @@ def main():
 
         # 机器人被踢出群组监听
     app.add_handler(ChatMemberHandler(bookkeeper.handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER))
-    # 监听所有群组中的非命令消息，记录群组信息
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, update_group_info))
+    # 消息中检测昵称变化
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, detect_name_change_in_message))
 
-    #关键词屏蔽
+    # 监听成员更新（改名字、改用户名）
+    app.add_handler(ChatMemberHandler(handle_name_change, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, detect_name_change_in_message))
+
+
+    # 关键词屏蔽
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), anti_ads.detect_and_delete_ads), group=2)
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_message_listener), group=0)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1)
     app.add_handler(CallbackQueryHandler(handle_group_users_callback, pattern=r"^(select_group|delete_group):"))
-
     app.add_handler(CallbackQueryHandler(callback_query_handler))
 
-
+    # 设置命令菜单
     app.post_init = set_commands
 
     print("✅ 机器人已启动")

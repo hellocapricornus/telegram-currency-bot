@@ -10,7 +10,7 @@ async def handle_premium_info(update: Update, context: ContextTypes.DEFAULT_TYPE
         "• 6 个月：<b>24 USDT</b>\n"
         "• 12 个月：<b>40 USDT</b>\n\n"
         "📌 请在下单前联系人工客服确认可开通状态，并获取付款地址。\n"
-        "💬 <a href='https://t.me/LightningPayGroup'>点此联系人工客服</a>\n\n"
+        "💬 <a href='https://t.me/VEXEPay'>点此联系人工客服</a>\n\n"
         "⚠️ 请勿自行转账，付款请先沟通确认账号及操作流程。"
     )
     await update.message.reply_text(

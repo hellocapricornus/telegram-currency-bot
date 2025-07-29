@@ -74,8 +74,8 @@ COMMANDS = [
 # 支持多个群组和频道，用户需加入任意一个才视为激活
 REQUIRED_CHAT_IDS = [-1002615680129, -1002739279735]  # 群组ID和频道ID
 REQUIRED_CHAT_LINKS = [
-    "https://t.me/LightningPayCG",
-    "https://t.me/LightningPayGC",
+    "https://t.me/VEXECN",
+    "https://t.me/VEXEGX",
 ]
 TRIAL_HOURS = 24
 

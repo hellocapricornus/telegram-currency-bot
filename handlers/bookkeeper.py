@@ -5,6 +5,7 @@ import math
 from datetime import datetime
 from telegram import (
     Update,
+    ChatPermissions,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     ChatMemberUpdated,
@@ -84,6 +85,28 @@ async def is_admin_or_operator(update: Update, context: ContextTypes.DEFAULT_TYP
     return user_username in operator_usernames
 
 
+# 下课：禁言所有成员
+async def handle_class_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin_or_operator(update, context):
+        await update.message.reply_text("❌ 只有管理员可以执行此操作")
+        return
+
+    chat_id = update.effective_chat.id
+    permissions = ChatPermissions(can_send_messages=False)  # 禁止发言
+    await context.bot.set_chat_permissions(chat_id=chat_id, permissions=permissions)
+    await update.message.reply_text("🔒 全群已禁言，下课啦！")
+
+# 上课：解除禁言
+async def handle_class_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin_or_operator(update, context):
+        await update.message.reply_text("❌ 只有管理员可以执行此操作")
+        return
+
+    chat_id = update.effective_chat.id
+    permissions = ChatPermissions(can_send_messages=True)  # 允许发言
+    await context.bot.set_chat_permissions(chat_id=chat_id, permissions=permissions)
+    await update.message.reply_text("🔓 全群已解除禁言，上课啦！")
+    
 # 启动记账命令
 async def handle_bookkeeping_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.effective_chat.type

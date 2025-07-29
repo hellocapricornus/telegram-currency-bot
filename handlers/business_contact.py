@@ -11,7 +11,7 @@ async def handle_business_contact(update: Update, context: ContextTypes.DEFAULT_
         "项目对接 / 渠道合作\n\n"
         "技术支持 / 产品定制\n\n"
         "市场推广 / 联合运营\n\n"
-        "📨 官方商务代表：@LightningPayGroup\n"
+        "📨 官方商务代表：@VEXEPay\n"
         "🔐 我们承诺对所有合作意向信息严格保密。\n\n"
         "期待与您展开深度合作，共创未来价值！"
     )

@@ -25,12 +25,17 @@ from telegram.ext import (
     filters,
     ChatMemberHandler,
 )
-
+from groups import delete_group  # 新增导入
 from telegram.constants import ChatType #新加
 from groups import load_groups, update_group_info #新加
 from handlers.exchange_rate import handle_exchange_rate, handle_exchange_rate_input
 from handlers.address import handle_address_input, button_callback as address_button_callback
-from handlers.bookkeeper import handle_bookkeeping_start, handle_end_bookkeeping
+from handlers.bookkeeper import (
+    handle_bookkeeping_start,
+    handle_end_bookkeeping,
+    handle_class_start,
+    handle_class_end,
+)
 from handlers.compare_price import handle_price_compare
 from handlers.transaction import (
     handle_transaction,
@@ -46,8 +51,10 @@ from handlers.business_contact import handle_business_contact
 load_dotenv()
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.DEBUG
 )
+
 logger = logging.getLogger(__name__)
 
 ADMIN_ID = 7596698993 #新加
@@ -110,16 +117,29 @@ async def handle_group_users_callback(update: Update, context: ContextTypes.DEFA
     await query.answer()
 
     data = query.data
+    user = query.from_user
+    message_id = query.message.message_id if query.message else "无消息ID"
+    logger.info(f"[Callback] 用户 {user.id} (@{user.username}) 触发回调，数据: {data}, message_id={message_id}")
+
     if data.startswith("select_group:"):
         group_id = data.split(":", 1)[1]
+        logger.info(f"[Callback] 选择查看群组，群组ID: {group_id}")
+
         groups = load_groups()
+        logger.debug(f"[Callback] 当前群组快照: {groups}")
+
         group = groups.get(group_id)
         if not group:
+            logger.warning(f"[Callback] 群组 {group_id} 不存在")
             await query.edit_message_text("⚠️ 群组信息不存在")
             return
 
         try:
+            start_time = datetime.utcnow()
             admins = await context.bot.get_chat_administrators(group_id)
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            logger.info(f"[Callback] 获取群组 {group_id} 管理员数: {len(admins)}，耗时: {duration:.2f}s")
+
             text_lines = [
                 f"✅ 群组名称：{group['title']}",
                 f"🆔 群组 ID：{group_id}",
@@ -127,29 +147,37 @@ async def handle_group_users_callback(update: Update, context: ContextTypes.DEFA
                 "管理员列表："
             ]
             for admin in admins:
-                user = admin.user
-                name = user.full_name
-                if user.username:
-                    name += f" (@{user.username})"
+                u = admin.user
+                name = u.full_name
+                if u.username:
+                    name += f" (@{u.username})"
                 text_lines.append(f"👤 {name}")
 
             await query.edit_message_text("\n".join(text_lines))
+            logger.info(f"[Callback] 群组管理员列表发送成功")
 
         except Exception as e:
+            logger.error(f"[Callback] 获取管理员列表失败: {e}\n{traceback.format_exc()}")
             await query.edit_message_text(f"⚠️ 获取管理员列表失败：{e}")
 
     elif data.startswith("delete_group:"):
         group_id = data.split(":", 1)[1]
-        groups = load_groups()
+        logger.info(f"[Callback] 请求删除群组，群组ID: {group_id}")
 
+        groups = load_groups()
         if group_id in groups:
             del groups[group_id]
-            with open(GROUP_FILE, "w", encoding="utf-8") as f:
-                json.dump(groups, f, ensure_ascii=False, indent=2)
-            await query.edit_message_text(f"✅ 已删除群组记录：{group_id}")
+            try:
+                with open(GROUP_FILE, "w", encoding="utf-8") as f:
+                    json.dump(groups, f, ensure_ascii=False, indent=2)
+                logger.info(f"[Callback] 群组 {group_id} 记录已删除")
+                await query.edit_message_text(f"✅ 已删除群组记录：{group_id}")
+            except Exception as e:
+                logger.error(f"[Callback] 删除群组文件写入失败: {e}\n{traceback.format_exc()}")
+                await query.edit_message_text(f"⚠️ 删除群组失败：{e}")
         else:
+            logger.warning(f"[Callback] 删除失败，群组 {group_id} 不存在")
             await query.edit_message_text("⚠️ 群组不存在或已被删除")
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🤖 机器人已启动")
@@ -504,9 +532,13 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # help机器人
-    app.add_handler(CommandHandler("help", handle_help))
+    # 1️⃣ 群组信息监听（优先级最高，保证记录群组）
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_message_listener), group=-1)
 
+    # 2️⃣ 注册命令
+    app.add_handler(MessageHandler(filters.Regex("^下课$"), handle_class_end))
+    app.add_handler(MessageHandler(filters.Regex("^上课$"), handle_class_start))
+    app.add_handler(CommandHandler("help", handle_help))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("list_users", handle_list_users))
     app.add_handler(CommandHandler("help", help_command))
@@ -514,67 +546,45 @@ def main():
     app.add_handler(CommandHandler("start_bookkeeping", handle_bookkeeping_start_safe))
     app.add_handler(CommandHandler("activate", handle_bookkeeping_start_safe))
     app.add_handler(CommandHandler("checkgroup", check_group_type))
-    # 添加以下记账消息处理器
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^开始记账$"), bookkeeper.handle_bookkeeping_start))
 
+    # 3️⃣ 记账功能
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^开始记账$"), bookkeeper.handle_bookkeeping_start))
     app.add_handler(MessageHandler(filters.Regex(r"^(入款|\+)\d+(\.\d{1,2})?$"), bookkeeper.handle_deposit), group=2)
     app.add_handler(MessageHandler(filters.Regex(r"^(入款-|-\d+(\.\d{1,2})?)$"), bookkeeper.handle_deposit_correction), group=2)
     pattern = re.compile(r"^下发\d+(\.\d{1,2})?U?$", re.IGNORECASE)
-
-    app.add_handler(
-        MessageHandler(
-            filters.Regex(pattern),
-            bookkeeper.handle_payout,
-        ),
-        group=2,
-    )
+    app.add_handler(MessageHandler(filters.Regex(pattern), bookkeeper.handle_payout), group=2)
     app.add_handler(MessageHandler(filters.Regex(r"^下发-\d+(\.\d{1,2})?U?$"), bookkeeper.handle_payout_correction), group=2)
     app.add_handler(MessageHandler(filters.Regex(r"^设置汇率\s*\d+(\.\d{1,2})?$"), bookkeeper.handle_set_rate), group=2)
     app.add_handler(MessageHandler(filters.Regex(r"^设置费率\s*-?\d+(\.\d{1,2})?%?$"), bookkeeper.handle_set_fee), group=2)
     app.add_handler(MessageHandler(filters.Regex(r"^添加操作人\s+@?\w+$"), bookkeeper.handle_add_operator), group=2)
     app.add_handler(MessageHandler(filters.Regex(r"^删除操作人\s+@?\w+$"), bookkeeper.handle_remove_operator), group=2)
 
-    # 账单保存和结束记账命令
-    app.add_handler(CommandHandler("save_bill", bookkeeper.handle_save_bill))  # 英文命令
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^保存账单$"), bookkeeper.handle_save_bill)) #中文命令
-    app.add_handler(CommandHandler("endbook", bookkeeper.handle_end_bookkeeping)) #英文命令
-    app.add_handler(MessageHandler(filters.Regex(r"^结束记账$"), bookkeeper.handle_end_bookkeeping)) #中文命令
-    # 回调处理
-        # 查询账单菜单，触发展示账单年份或账单列表
+    # 账单保存和结束记账
+    app.add_handler(CommandHandler("save_bill", bookkeeper.handle_save_bill))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^保存账单$"), bookkeeper.handle_save_bill))
+    app.add_handler(CommandHandler("endbook", bookkeeper.handle_end_bookkeeping))
+    app.add_handler(MessageHandler(filters.Regex(r"^结束记账$"), bookkeeper.handle_end_bookkeeping))
+
+    # 账单查询回调
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_query_bill, pattern="^query_bill$"))
-
-        # 按年份筛选账单（如果有）
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_bill_year_selection, pattern="^bill_year:"))
-
-        # 按月份筛选账单（如果有）
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_bill_month_selection, pattern="^bill_month:"))
-
-        # 展示账单分页列表
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_bill_list, pattern="^bill_list:"))
-
-        # 查看具体账单内容（替代原 handle_bill_selection）
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_bill_view, pattern="^bill_view:"))
-
-        # 删除账单
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_bill_delete, pattern="^bill_delete:"))
-
-    # 使用说明
     app.add_handler(CallbackQueryHandler(usage_guide.usage_guide_callback, pattern="^back_to_menu$"))
 
-        # 机器人被踢出群组监听
+    # 机器人被踢出群
     app.add_handler(ChatMemberHandler(bookkeeper.handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER))
-    # 消息中检测昵称变化
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, detect_name_change_in_message))
 
-    # 监听成员更新（改名字、改用户名）
+    # 成员昵称更新
     app.add_handler(ChatMemberHandler(handle_name_change, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, detect_name_change_in_message))
-
 
     # 关键词屏蔽
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), anti_ads.detect_and_delete_ads), group=2)
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_message_listener), group=0)
+    # 其他普通消息
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1)
     app.add_handler(CallbackQueryHandler(handle_group_users_callback, pattern=r"^(select_group|delete_group):"))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
@@ -584,6 +594,7 @@ def main():
 
     print("✅ 机器人已启动")
     app.run_polling()
+
 
 
 if __name__ == "__main__":

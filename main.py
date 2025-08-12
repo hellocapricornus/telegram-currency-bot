@@ -548,16 +548,20 @@ def main():
     app.add_handler(CommandHandler("checkgroup", check_group_type))
 
     # 3️⃣ 记账功能
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^开始记账$"), bookkeeper.handle_bookkeeping_start))
-    app.add_handler(MessageHandler(filters.Regex(r"^(入款|\+)\d+(\.\d{1,2})?$"), bookkeeper.handle_deposit), group=2)
-    app.add_handler(MessageHandler(filters.Regex(r"^(入款-|-\d+(\.\d{1,2})?)$"), bookkeeper.handle_deposit_correction), group=2)
-    pattern = re.compile(r"^下发\d+(\.\d{1,2})?U?$", re.IGNORECASE)
-    app.add_handler(MessageHandler(filters.Regex(pattern), bookkeeper.handle_payout), group=2)
-    app.add_handler(MessageHandler(filters.Regex(r"^下发-\d+(\.\d{1,2})?U?$"), bookkeeper.handle_payout_correction), group=2)
-    app.add_handler(MessageHandler(filters.Regex(r"^设置汇率\s*\d+(\.\d{1,2})?$"), bookkeeper.handle_set_rate), group=2)
-    app.add_handler(MessageHandler(filters.Regex(r"^设置费率\s*-?\d+(\.\d{1,2})?%?$"), bookkeeper.handle_set_fee), group=2)
-    app.add_handler(MessageHandler(filters.Regex(r"^添加操作人\s+@?\w+$"), bookkeeper.handle_add_operator), group=2)
-    app.add_handler(MessageHandler(filters.Regex(r"^删除操作人\s+@?\w+$"), bookkeeper.handle_remove_operator), group=2)
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^开始记账$", re.IGNORECASE)), bookkeeper.handle_bookkeeping_start))
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^(入款|\+)\d+(\.\d{1,2})?$", re.IGNORECASE)), bookkeeper.handle_deposit), group=2)
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^(入款-|-\d+(\.\d{1,2})?)$", re.IGNORECASE)), bookkeeper.handle_deposit_correction), group=2)
+
+    pattern_payout = re.compile(r"^下发\d+(\.\d{1,2})?[Uu]?$", re.IGNORECASE)
+    app.add_handler(MessageHandler(filters.Regex(pattern_payout), bookkeeper.handle_payout), group=2)
+
+    pattern_payout_correction = re.compile(r"^下发-\d+(\.\d{1,2})?[Uu]?$", re.IGNORECASE)
+    app.add_handler(MessageHandler(filters.Regex(pattern_payout_correction), bookkeeper.handle_payout_correction), group=2)
+
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^设置汇率\s*\d+(\.\d{1,2})?$", re.IGNORECASE)), bookkeeper.handle_set_rate), group=2)
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^设置费率\s*-?\d+(\.\d{1,2})?%?$", re.IGNORECASE)), bookkeeper.handle_set_fee), group=2)
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^添加操作人\s+@?\w+$", re.IGNORECASE)), bookkeeper.handle_add_operator), group=2)
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^删除操作人\s+@?\w+$", re.IGNORECASE)), bookkeeper.handle_remove_operator), group=2)
 
     # 账单保存和结束记账
     app.add_handler(CommandHandler("save_bill", bookkeeper.handle_save_bill))

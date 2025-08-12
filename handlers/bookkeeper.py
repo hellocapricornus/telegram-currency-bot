@@ -242,12 +242,18 @@ async def handle_payout_correction(update: Update, context: ContextTypes.DEFAULT
 
     text = update.message.text.strip()
 
-    match = re.match(r"^(下发)?-?(\d+(\.\d{1,2})?)([Uu])?$", text)
+    # 正则：匹配 “下发-2000U” 或 “下发2000u”等格式
+    match = re.match(r"^下发(-?\d+(\.\d{1,2})?)([Uu])?$", text)
     if not match:
         return
 
-    amount = float(match.group(2))
-    has_u = match.group(4) is not None
+    amount_str = match.group(1)   # 整个数字部分（带符号）
+    has_u = match.group(3) is not None
+
+    try:
+        amount = float(amount_str)
+    except ValueError:
+        return
 
     rate = bookkeeping_data[chat_id].get("rate")
     fee = bookkeeping_data[chat_id].get("fee")
@@ -259,24 +265,24 @@ async def handle_payout_correction(update: Update, context: ContextTypes.DEFAULT
     time_str = datetime.now().strftime("%H:%M:%S")
 
     if has_u:
-        # ✅ 通过 USDT 修正，先计算原币种金额
+        # amount 自带正负，直接用
         coin_amount = amount * rate / (1 - fee / 100)
         bookkeeping_data[chat_id]["out"].append({
             "time": time_str,
-            "amount": -coin_amount,
-            "usdt_amount": -amount,
+            "amount": coin_amount,
+            "usdt_amount": amount,
             "is_usdt": True
         })
     else:
-        # ✅ 修正的是原币种金额
         bookkeeping_data[chat_id]["out"].append({
             "time": time_str,
-            "amount": -amount,
-            "usdt_amount": -amount * (1 - fee / 100) / rate,
+            "amount": amount,
+            "usdt_amount": amount * (1 - fee / 100) / rate,
             "is_usdt": False
         })
 
     await render_summary(update, context)
+
 
 
 # 保存账单命令

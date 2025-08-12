@@ -479,10 +479,45 @@ async def handle_bill_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [f"账单时间: {filename[-19:-5]}\n"]
     lines.append(f"操作人: {', '.join(data.get('operator_usernames', [])) or '无'}")
 
-    for typ in ["in", "out"]:
-        lines.append("\n入款记录:" if typ == "in" else "\n下发记录:")
-        for rec in data.get(typ, []):
-            lines.append(f"{rec['time']}  {rec['amount']:+.2f}")
+    def calculate_usdt(amount, fee, rate):
+        if rate is None or fee is None:
+            return 0
+        return amount * (1 - fee / 100) / rate if rate else 0
+
+    total_deposit = sum([item["amount"] for item in data.get("in", [])])
+    total_payout = sum([item["amount"] for item in data.get("out", [])])
+
+    total_deposit_usdt = sum([calculate_usdt(rec["amount"], rec.get("fee", 0), rec.get("rate")) for rec in data.get("in", [])])
+    total_payout_usdt = 0
+    for item in data.get("out", []):
+        if "usdt_amount" in item:
+            total_payout_usdt += item["usdt_amount"]
+        else:
+            fee = data.get("fee", 0)
+            rate = data.get("rate", 1)
+            total_payout_usdt += calculate_usdt(item["amount"], fee, rate)
+
+    lines.append("\n入款记录:")
+    for rec in data.get("in", []):
+        usdt_val = calculate_usdt(rec["amount"], rec.get("fee", 0), rec.get("rate"))
+        lines.append(f"{rec['time']}  +{rec['amount']:.2f} (汇率: {rec.get('rate', 'N/A')} 费率: {rec.get('fee', 'N/A')}%)  ≈ {usdt_val:.2f} USDT")
+
+    lines.append("\n下发记录:")
+    for rec in data.get("out", []):
+        if rec.get("is_usdt", False):
+            lines.append(f"{rec['time']}  -{rec['amount']:.2f} | {rec['usdt_amount']:.2f} USDT")
+        else:
+            fee = data.get("fee", 0)
+            rate = data.get("rate", 1)
+            usdt_val = calculate_usdt(rec["amount"], fee, rate)
+            lines.append(f"{rec['time']}  -{rec['amount']:.2f} | {usdt_val:.2f} USDT")
+
+    lines.append(f"\n默认费率: {data.get('fee', 0):.2f}%")
+    lines.append(f"默认汇率: {data.get('rate', 0) if data.get('rate') is not None else '未设置'}")
+
+    lines.append(f"\n总入款: {total_deposit:.2f} | {total_deposit_usdt:.2f} USDT")
+    lines.append(f"已下发: {total_payout:.2f} | {total_payout_usdt:.2f} USDT")
+    lines.append(f"未下发: {total_deposit - total_payout:.2f} | {total_deposit_usdt - total_payout_usdt:.2f} USDT")
 
     await query.edit_message_text("\n".join(lines))
 

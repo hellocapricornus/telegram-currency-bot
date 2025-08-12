@@ -516,8 +516,8 @@ async def handle_bill_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"默认汇率: {data.get('rate', 0) if data.get('rate') is not None else '未设置'}")
 
     lines.append(f"\n总入款: {total_deposit:.2f} | {total_deposit_usdt:.2f} USDT")
-    lines.append(f"已下发: {total_payout:.2f} | {total_payout_usdt:.2f} USDT")
-    lines.append(f"未下发: {total_deposit - total_payout:.2f} | {total_deposit_usdt - total_payout_usdt:.2f} USDT")
+    lines.append(f"已下发:  {total_payout_usdt:.2f} USDT")
+    lines.append(f"未下发: {total_deposit_usdt - total_payout_usdt:.2f} USDT")
 
     await query.edit_message_text("\n".join(lines))
 
@@ -684,9 +684,9 @@ async def render_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"默认汇率: {data.get('rate', 0) if data.get('rate') is not None else '未设置'}")
 
     lines.append(f"\n总入款: {total_deposit:.2f} | {total_deposit_usdt:.2f}USDT")
-    lines.append(f"\n应下发: {total_deposit:.2f} | {total_deposit_usdt:.2f}USDT")
-    lines.append(f"已下发: {total_payout:.2f} | {total_payout_usdt:.2f}USDT")
-    lines.append(f"未下发: {remain:.2f} | {remain_usdt:.2f}USDT")
+    lines.append(f"\n应下发: {total_deposit_usdt:.2f}USDT")
+    lines.append(f"已下发: {total_payout_usdt:.2f}USDT")
+    lines.append(f"未下发: {remain_usdt:.2f}USDT")
     lines.append(f"\n总记录: {len(data.get('in', [])) + len(data.get('out', []))}条, 显示{len(deposit_records) + len(payout_records)}条")
 
     keyboard = InlineKeyboardMarkup([

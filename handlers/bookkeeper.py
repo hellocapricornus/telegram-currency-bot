@@ -2,7 +2,7 @@ import os
 import re
 import json
 import math
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from telegram import (
     Update,
     ChatPermissions,
@@ -31,6 +31,9 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 bookkeeping_data = {}
 
 # ----- 缓存文件操作 -----
+def now_beijing():
+    return datetime.now(timezone.utc) + timedelta(hours=8)
+    
 def get_cache_path(chat_id):
     return os.path.join(CACHE_DIR, f"{chat_id}.json")
 
@@ -168,7 +171,7 @@ async def handle_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     fee = group_data.get("fee")
 
-    time_str = datetime.now().strftime("%H:%M:%S")
+    time_str = now_beijing().strftime("%H:%M:%S")
 
     # 入款记录里增加单笔汇率字段
     bookkeeping_data[chat_id]["in"].append({
@@ -199,7 +202,7 @@ async def handle_deposit_correction(update: Update, context: ContextTypes.DEFAUL
     rate = float(match.group(5)) if match.group(5) else bookkeeping_data[chat_id].get("rate")
     fee = bookkeeping_data[chat_id].get("fee", 0)
 
-    time_str = datetime.now().strftime("%H:%M:%S")
+    time_str = now_beijing().strftime("%H:%M:%S")
 
     bookkeeping_data[chat_id]["in"].append({
         "time": time_str,
@@ -230,7 +233,7 @@ async def handle_payout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rate = bookkeeping_data[chat_id].get("rate")
     fee = bookkeeping_data[chat_id].get("fee")
 
-    time_str = datetime.now().strftime("%H:%M:%S")
+    time_str = now_beijing().strftime("%H:%M:%S")
 
     if has_u:
         # 反算币种金额 = USDT * 汇率 / (1 - 费率%)
@@ -283,7 +286,7 @@ async def handle_payout_correction(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("请先设置费率和汇率（设置费率5%、设置汇率100）")
         return
 
-    time_str = datetime.now().strftime("%H:%M:%S")
+    time_str = now_beijing().strftime("%H:%M:%S")
 
     if has_u:
         # amount 自带正负，直接用
@@ -316,7 +319,7 @@ async def handle_save_bill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin_or_operator(update, context):
         return
 
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    now = now_beijing().strftime("%Y%m%d_%H%M%S")
     filepath = os.path.join(HISTORY_DIR, f"{chat_id}_{now}.json")
 
     data_to_save = bookkeeping_data[chat_id].copy()
@@ -624,7 +627,7 @@ async def render_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remain = total_deposit - total_payout
     remain_usdt = total_deposit_usdt - total_payout_usdt
 
-    now = datetime.now().strftime("%Y年%m月%d日  %H:%M:%S")
+    now = now_beijing().strftime("%Y年%m月%d日  %H:%M:%S")
     lines = [f"{now}\n"]
 
     lines.append(f"入款({len(deposit_records)}笔)")

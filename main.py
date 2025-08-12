@@ -35,6 +35,7 @@ from handlers.bookkeeper import (
     handle_end_bookkeeping,
     handle_class_start,
     handle_class_end,
+    handle_query_bill_message,
 )
 from handlers.compare_price import handle_price_compare
 from handlers.transaction import (
@@ -549,8 +550,8 @@ def main():
 
     # 3️⃣ 记账功能
     app.add_handler(MessageHandler(filters.Regex(re.compile(r"^开始记账$", re.IGNORECASE)), bookkeeper.handle_bookkeeping_start))
-    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^(入款|\+)\d+(\.\d{1,2})?$", re.IGNORECASE)), bookkeeper.handle_deposit), group=2)
-    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^(入款-|-\d+(\.\d{1,2})?)$", re.IGNORECASE)), bookkeeper.handle_deposit_correction), group=2)
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^(入款|\+)\d+(\.\d{1,2})?(\s+\d+(\.\d{1,4})?)?$", re.IGNORECASE)), bookkeeper.handle_deposit), group=2)
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^(入款-|\-)(\d+(\.\d{1,2})?)(\s+(\d+(\.\d{1,4})?))?$", re.IGNORECASE)), bookkeeper.handle_deposit_correction), group=2)
 
     pattern_payout = re.compile(r"^下发\d+(\.\d{1,2})?[Uu]?$", re.IGNORECASE)
     app.add_handler(MessageHandler(filters.Regex(pattern_payout), bookkeeper.handle_payout), group=2)
@@ -568,6 +569,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^保存账单$"), bookkeeper.handle_save_bill))
     app.add_handler(CommandHandler("endbook", bookkeeper.handle_end_bookkeeping))
     app.add_handler(MessageHandler(filters.Regex(r"^结束记账$"), bookkeeper.handle_end_bookkeeping))
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^查询账单$", re.IGNORECASE)), handle_query_bill_message), group=2)
 
     # 账单查询回调
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_query_bill, pattern="^query_bill$"))

@@ -145,26 +145,38 @@ async def handle_deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id not in bookkeeping_data or not bookkeeping_data[chat_id]["active"]:
         return
 
-    # 获取当前群组的记账数据
     group_data = bookkeeping_data[chat_id]
 
-    # 检查是否已设置汇率和费率
-    if group_data.get("rate") is None or group_data.get("fee") is None:
-        await update.message.reply_text("⚠️ 请先设置汇率和费率后才能进行入款。")
+    # 如果默认汇率或费率没设置，先提醒
+    if group_data.get("fee") is None:
+        await update.message.reply_text("⚠️ 请先设置费率后才能进行入款。")
         return
 
-    # 异步权限判断
     if not await is_admin_or_operator(update, context):
         return
 
     text = update.message.text.strip()
-    match = re.match(r"^(入款|\+)(\d+(\.\d{1,2})?)$", text, re.IGNORECASE)
+
+    # 支持格式：+10000 或 +10000 46.5
+    match = re.match(r"^\+(\d+(\.\d{1,2})?)(?:\s+(\d+(\.\d{1,4})?))?$", text)
     if not match:
         return
 
-    amount = float(match.group(2))
+    amount = float(match.group(1))
+    # 如果输入了汇率，优先用输入的汇率，否则用默认汇率
+    rate = float(match.group(3)) if match.group(3) else group_data.get("rate")
+
+    fee = group_data.get("fee")
+
     time_str = datetime.now().strftime("%H:%M:%S")
-    bookkeeping_data[chat_id]["in"].append({"time": time_str, "amount": amount})
+
+    # 入款记录里增加单笔汇率字段
+    bookkeeping_data[chat_id]["in"].append({
+        "time": time_str,
+        "amount": amount,
+        "rate": rate,
+        "fee": fee,
+    })
 
     await render_summary(update, context)
 
@@ -175,18 +187,27 @@ async def handle_deposit_correction(update: Update, context: ContextTypes.DEFAUL
     if chat_id not in bookkeeping_data or not bookkeeping_data[chat_id]["active"]:
         return
 
-    # 异步调用
     if not await is_admin_or_operator(update, context):
         return
 
     text = update.message.text.strip()
-    match = re.match(r"^(入款-|\-)(\d+(\.\d{1,2})?)$", text, re.IGNORECASE)
+    match = re.match(r"^(入款-|\-)(\d+(\.\d{1,2})?)(\s+(\d+(\.\d{1,4})?))?$", text, re.IGNORECASE)
     if not match:
         return
 
     amount = float(match.group(2))
+    rate = float(match.group(5)) if match.group(5) else bookkeeping_data[chat_id].get("rate")
+    fee = bookkeeping_data[chat_id].get("fee", 0)
+
     time_str = datetime.now().strftime("%H:%M:%S")
-    bookkeeping_data[chat_id]["in"].append({"time": time_str, "amount": -amount})
+
+    bookkeeping_data[chat_id]["in"].append({
+        "time": time_str,
+        "amount": -amount,
+        "rate": rate,
+        "fee": fee,
+    })
+
     await render_summary(update, context)
 
 # 下发处理
@@ -578,23 +599,27 @@ async def render_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     deposit_records = data.get("in", [])[-8:]
     payout_records = data.get("out", [])[-8:]
-    rate = data.get("rate")
-    fee = data.get("fee")
 
-    def calculate_usdt(amount):
+    # 计算总入款USDT时，每条用对应的 rate 和 fee
+    def calculate_usdt(amount, fee, rate):
+        if rate is None or fee is None:
+            return 0
         return amount * (1 - fee / 100) / rate if rate else 0
 
     total_deposit = sum([item["amount"] for item in data.get("in", [])])
 
-    # 计算总下发USDT
+    total_deposit_usdt = sum([calculate_usdt(rec["amount"], rec.get("fee", 0), rec.get("rate")) for rec in data.get("in", [])])
+
     total_payout_usdt = 0
     for item in data.get("out", []):
         if "usdt_amount" in item:
             total_payout_usdt += item["usdt_amount"]
         else:
-            total_payout_usdt += calculate_usdt(item["amount"])
+            # 用默认费率和汇率算
+            fee = data.get("fee", 0)
+            rate = data.get("rate", 1)
+            total_payout_usdt += calculate_usdt(item["amount"], fee, rate)
 
-    total_deposit_usdt = calculate_usdt(total_deposit)
     total_payout = sum([item["amount"] for item in data.get("out", [])])
     remain = total_deposit - total_payout
     remain_usdt = total_deposit_usdt - total_payout_usdt
@@ -604,18 +629,22 @@ async def render_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines.append(f"入款({len(deposit_records)}笔)")
     for rec in deposit_records:
-        lines.append(f"{rec['time']}  +{rec['amount']:.2f}")
+        usdt_val = calculate_usdt(rec["amount"], rec.get("fee", 0), rec.get("rate"))
+        lines.append(f"{rec['time']}  +{rec['amount']:.2f} (汇率: {rec.get('rate', 'N/A')} 费率: {rec.get('fee', 'N/A')}%)  ≈ {usdt_val:.2f} USDT")
 
     lines.append(f"\n下发({len(payout_records)}笔)")
     for rec in payout_records:
         if rec.get("is_usdt", False):
             lines.append(f"{rec['time']}  -{rec['amount']:.2f} | {rec['usdt_amount']:.2f}USDT")
         else:
-            usdt_val = calculate_usdt(rec["amount"])
+            fee = data.get("fee", 0)
+            rate = data.get("rate", 1)
+            usdt_val = calculate_usdt(rec["amount"], fee, rate)
             lines.append(f"{rec['time']}  -{rec['amount']:.2f} | {usdt_val:.2f}USDT")
 
-    lines.append(f"\n费率: {fee:.2f}%")
-    lines.append(f"USDT汇率: {rate:.2f}")
+    lines.append(f"\n默认费率: {data.get('fee', 0):.2f}%")
+    lines.append(f"默认汇率: {data.get('rate', 0) if data.get('rate') is not None else '未设置'}")
+
     lines.append(f"\n总入款: {total_deposit:.2f} | {total_deposit_usdt:.2f}USDT")
     lines.append(f"\n应下发: {total_deposit:.2f} | {total_deposit_usdt:.2f}USDT")
     lines.append(f"已下发: {total_payout:.2f} | {total_payout_usdt:.2f}USDT")
@@ -660,3 +689,18 @@ async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         context.application.logger.error(f"删除群组账单文件失败: {f} 错误: {e}")
 
             context.application.logger.info(f"机器人被移出群组 {chat_member_update.chat.title}({chat_id})，清除对应账单缓存和历史账单。")
+
+# 新增一个处理文本“查询账单”的函数，触发时发送内联按钮
+async def handle_query_bill_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    files = [f for f in os.listdir(HISTORY_DIR) if f.startswith(str(chat_id))]
+    if not files:
+        await update.message.reply_text("暂无历史账单记录。")
+        return
+
+    years = sorted(set(f[len(str(chat_id))+1:len(str(chat_id))+5] for f in files), reverse=True)
+    buttons = [[InlineKeyboardButton(y, callback_data=f"bill_year:{y}")] for y in years]
+    buttons.append([InlineKeyboardButton("全部账单", callback_data="bill_list:all:0")])
+    markup = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text("📅 请选择年份查看账单：", reply_markup=markup)

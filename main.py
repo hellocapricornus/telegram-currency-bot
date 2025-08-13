@@ -65,7 +65,7 @@ GROUP_FILE = "data/groups.json"
 BUTTONS = [
     ["🧾 开始记账", "📈 点位对比", "💹 实时U价"],
     ["💰 地址查询", "🤝 交易查询", "💎 代开会员"],
-    ["📥 商务联系", "📖 使用说明", "📊 互转分析"],
+    ["📥 商务联系", "📢 群发助手", "📊 互转分析"],
 ]
 
 BUTTON_TEXTS = {btn for row in BUTTONS for btn in row}
@@ -380,6 +380,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.effective_chat.id
         logger.info(f"收到消息：chat_id={chat_id} user_id={user_id} text={text}")
 
+        # 如果是在群发助手输入消息阶段，优先处理
+        if context.user_data.get("awaiting_broadcast_content"):
+            # 用户输入群发内容
+            await usage_guide.handle_broadcast_content(update, context)
+            return
+
+        if context.user_data.get("awaiting_broadcast_confirm"):
+            # 用户需要输入“发送”确认
+            if text == "发送":
+                await usage_guide.handle_broadcast_send(update, context)
+            else:
+                await update.message.reply_text("⚠️ 请输入“发送”以确认群发，或发送其他内容取消。")
+                context.user_data.clear()
+            return
+
         if chat_type in ["group", "supergroup"]:
             if text in ["🧾 开始记账", "/start_bookkeeping", "/activate"]:
                 await handle_bookkeeping_start_safe(update, context)
@@ -435,8 +450,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_business_contact(update, context)
             return
 
-        if text == "📖 使用说明":
-            await usage_guide.handle_usage_guide(update, context)
+        if text == "📢 群发助手":
+            await usage_guide.handle_broadcast_start(update, context)
             return
 
         if text == "📊 互转分析":
@@ -578,7 +593,14 @@ def main():
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_bill_list, pattern="^bill_list:"))
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_bill_view, pattern="^bill_view:"))
     app.add_handler(CallbackQueryHandler(bookkeeper.handle_bill_delete, pattern="^bill_delete:"))
-    app.add_handler(CallbackQueryHandler(usage_guide.usage_guide_callback, pattern="^back_to_menu$"))
+    # 监听群组选择回调
+    app.add_handler(CallbackQueryHandler(usage_guide.handle_broadcast_group_toggle, pattern=r"^broadcast_toggle"))
+
+    # 监听确认按钮回调
+    app.add_handler(CallbackQueryHandler(usage_guide.handle_broadcast_confirm, pattern=r"^broadcast_confirm$"))
+
+    # 监听“发送”文本消息确认群发
+    app.add_handler(MessageHandler(filters.Regex("^发送$"), usage_guide.handle_broadcast_send), group=1)
 
     # 机器人被踢出群
     app.add_handler(ChatMemberHandler(bookkeeper.handle_bot_removed, ChatMemberHandler.MY_CHAT_MEMBER))

@@ -5,7 +5,14 @@ from groups import load_groups  # 你的群组加载函数，返回dict格式 {�
 
 logger = logging.getLogger(__name__)
 
+ALLOWED_USER_IDS = {7596698993, 7597598174, 8331810770, 8172118207}  # 允许的 Telegram 用户 ID
+
 async def handle_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ALLOWED_USER_IDS:
+        await update.message.reply_text("❌ 你没有权限使用此功能。")
+        return
+        
     context.user_data.clear()
     context.user_data["awaiting_broadcast_content"] = True
     await update.message.reply_text("📢 请输入需要群发的内容：")

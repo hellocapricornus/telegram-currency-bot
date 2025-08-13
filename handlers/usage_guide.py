@@ -1,49 +1,118 @@
-# handlers/usage_guide.py
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
+import logging
+from groups import load_groups  # 你的群组加载函数，返回dict格式 {群ID: {"title": "群名称"}}
 
 logger = logging.getLogger(__name__)
 
-USAGE_TEXT = (
-    "🤖 记账机器人功能介绍：\n\n"
-    "🧾【开始记账】\n启动群组记账，管理员和操作员专用。\n\n"
-    "📈【点位对比】\n输入点位数字，快速比较行情变化。\n\n"
-    "💹【实时U价】\n查询当前USDT汇率，精准折算。\n\n"
-    "💰【地址查询】\n支持TRON和以太坊地址余额查询。\n\n"
-    "🤝【交易查询】\n查询多个地址间的转账记录。\n\n"
-    "💎【代开会员】\n获取会员服务及专属权限。\n\n"
-    "📥【商务联系】\n快速联系商务支持人员。\n\n"
-    "📊【互转分析】\n分析多地址间的资金流动。\n\n"
-    "📢 本机器人永久免费使用，无任何收费。"
-)
+async def handle_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    context.user_data["awaiting_broadcast_content"] = True
+    await update.message.reply_text("📢 请输入需要群发的内容：")
 
-BACK_BUTTON = InlineKeyboardMarkup(
-    [[InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back_to_menu")]]
-)
+# 用户输入群发内容，进入选择群组阶段
+async def handle_broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["broadcast_content"] = update.message.text
+    context.user_data.pop("awaiting_broadcast_content", None)
 
-async def handle_usage_guide(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if update.message:
-            await update.message.reply_text(USAGE_TEXT, reply_markup=BACK_BUTTON)
-        elif update.callback_query:
-            await update.callback_query.answer()
-            await update.callback_query.edit_message_text(USAGE_TEXT, reply_markup=BACK_BUTTON)
-    except Exception as e:
-        logger.error(f"handle_usage_guide异常: {e}")
-        if update.message:
-            await update.message.reply_text("⚠️ 使用说明加载失败，请稍后重试。")
+    groups = load_groups()
+    if not groups:
+        await update.message.reply_text("⚠️ 暂无可群发的群组记录。")
+        return
 
-async def usage_guide_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        query = update.callback_query
-        await query.answer()
-        # 返回主菜单的逻辑，根据你的main.py按钮回复，这里示例返回固定文本
-        await query.edit_message_text(
-            "欢迎使用记账机器人，请选择一个功能：",
-            reply_markup=None  # 如果你用ReplyKeyboardMarkup，是消息回复键盘，不是内联按钮
-        )
-    except Exception as e:
-        logger.error(f"usage_guide_callback异常: {e}")
-        if update.callback_query:
-            await update.callback_query.answer(text="操作失败，请稍后重试。", show_alert=True)
+    # 初始化选中集合为空
+    context.user_data["broadcast_selected"] = set()
+    context.user_data["awaiting_broadcast_groups"] = True
+
+    keyboard = build_broadcast_group_keyboard(context.user_data["broadcast_selected"], groups)
+    await update.message.reply_text("请选择需要发送的群：", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+# 根据当前选中状态生成键盘（包含全选/全不选按钮）
+def build_broadcast_group_keyboard(selected: set, groups: dict):
+    keyboard = []
+
+    all_selected = len(selected) == len(groups) and len(groups) > 0
+    all_label = "全不选" if all_selected else "全选"
+    keyboard.append([InlineKeyboardButton(f"🔘 {all_label}", callback_data="broadcast_toggle_all")])
+
+    for gid, info in groups.items():
+        prefix = "✅" if gid in selected else "⬜"
+        keyboard.append([InlineKeyboardButton(f"{prefix} {info['title']}", callback_data=f"broadcast_toggle:{gid}")])
+
+    keyboard.append([InlineKeyboardButton("✅ 确认选择", callback_data="broadcast_confirm")])
+    return keyboard
+
+
+# 处理选择群组或全选按钮的回调
+async def handle_broadcast_group_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    groups = load_groups()
+    selected = context.user_data.get("broadcast_selected", set())
+
+    if data == "broadcast_toggle_all":
+        # 全选或全不选
+        if len(selected) == len(groups):
+            selected.clear()
+        else:
+            selected = set(groups.keys())
+        context.user_data["broadcast_selected"] = selected
+    else:
+        # 单个群组切换选择状态
+        gid = data.split(":")[1]
+        if gid in selected:
+            selected.remove(gid)
+        else:
+            selected.add(gid)
+        context.user_data["broadcast_selected"] = selected
+
+    keyboard = build_broadcast_group_keyboard(selected, groups)
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+# 处理确认按钮，提示发送确认
+async def handle_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    selected_ids = context.user_data.get("broadcast_selected", set())
+    if not selected_ids:
+        await query.edit_message_text("⚠️ 你还没有选择任何群组。")
+        return
+
+    groups = load_groups()
+    names = [groups[gid]["title"] for gid in selected_ids if gid in groups]
+
+    context.user_data["awaiting_broadcast_confirm"] = True
+    await query.edit_message_text(
+        f"📢 将向以下群发送消息：\n" + "\n".join(names) + "\n\n请输入 **发送** 确认发送。"
+    )
+
+
+# 监听用户输入“发送”，开始群发
+async def handle_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get("awaiting_broadcast_confirm", False):
+        await update.message.reply_text("⚠️ 当前没有待发送的群发任务，请先输入群发内容。")
+        return
+
+    content = context.user_data.get("broadcast_content")
+    selected_ids = context.user_data.get("broadcast_selected", set())
+
+    if not content or not selected_ids:
+        await update.message.reply_text("⚠️ 群发数据缺失，请重新开始。")
+        context.user_data.clear()
+        return
+
+    sent_count = 0
+    for gid in selected_ids:
+        try:
+            await context.bot.send_message(chat_id=int(gid), text=content)
+            sent_count += 1
+        except Exception as e:
+            logger.error(f"向群 {gid} 发送失败: {e}")
+
+    await update.message.reply_text(f"✅ 群发完成，共发送到 {sent_count} 个群。")
+    context.user_data.clear()

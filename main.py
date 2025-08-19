@@ -554,7 +554,7 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     # 1️⃣ 群组信息监听（优先级最高，保证记录群组）
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_message_listener), group=-1)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_message_listener), group=10)
 
     # 注册用户标记功能
     register_marked_users_handlers(app)

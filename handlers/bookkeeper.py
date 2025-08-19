@@ -695,7 +695,9 @@ async def render_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
 
-    await update.message.reply_text("\n".join(lines), reply_markup=keyboard)
+    await update.message.reply_text(
+        "\n".join(lines)
+    )  # reply_markup=keyboard
 
 async def handle_bot_removed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_member_update = update.my_chat_member

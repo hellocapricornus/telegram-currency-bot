@@ -14,7 +14,7 @@ from telegram import (
     Update,
     BotCommand,
 ) 
-
+from handlers.marked_users import register_marked_users_handlers
 from telegram.constants import ChatMemberStatus
 from telegram.ext import (
     ApplicationBuilder,
@@ -77,6 +77,11 @@ COMMANDS = [
     BotCommand("activate", "群组中激活记账功能"),
     BotCommand("status", "查看试用/激活状态"),
     BotCommand("checkgroup", "查看群组信息和类型"),
+
+    # === 标记功能（仅限 7596698993 在私聊中使用）===
+    BotCommand("mark", "标记用户（仅管理员）"),
+    BotCommand("unmark", "取消标记用户（仅管理员）"),
+    BotCommand("marked_users", "查看所有已标记用户（仅管理员）"),
 ]
 
 # 支持多个群组和频道，用户需加入任意一个才视为激活
@@ -551,6 +556,9 @@ def main():
     # 1️⃣ 群组信息监听（优先级最高，保证记录群组）
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_message_listener), group=-1)
 
+    # 注册用户标记功能
+    register_marked_users_handlers(app)
+    
     # 2️⃣ 注册命令
     app.add_handler(MessageHandler(filters.Regex("^下课$"), handle_class_end))
     app.add_handler(MessageHandler(filters.Regex("^上课$"), handle_class_start))

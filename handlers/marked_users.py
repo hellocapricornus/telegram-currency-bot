@@ -115,5 +115,5 @@ def register_marked_users_handlers(app):
     app.add_handler(CommandHandler("marked_users", handle_list_marked_users))
     app.add_handler(
         MessageHandler(filters.ChatType.GROUPS & filters.ALL, detect_marked_user),
-        group=0
+        group=15
     )

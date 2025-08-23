@@ -13,8 +13,10 @@ HELP_TEXT = """📘 <b>记账机器人命令说明</b>
 
 🧾 <b>记账流程</b>
 开始记账
-入款xxx 或 +xxx
-入款修正：入款-xxx 或 -xxx
++xxx
++xxx 汇率
+入款修正：-xxx
+入款修正：-xxx 汇率
 下发xxx 或 下发xxxU
 下发修正：下发-xxx 或 下发-xxxU
 保存账单

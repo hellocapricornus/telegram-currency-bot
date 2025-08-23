@@ -123,75 +123,51 @@ async def handle_group_users_callback(update: Update, context: ContextTypes.DEFA
     await query.answer()
 
     data = query.data
-    user = query.from_user
-    message_id = query.message.message_id if query.message else "无消息ID"
-    logger.info(f"[Callback] 用户 {user.id} (@{user.username}) 触发回调，数据: {data}, message_id={message_id}")
+    logger.info(f"[Callback] 用户 {query.from_user.id} 触发回调，数据: {data}")
+
+    # 读取最新 groups 数据
+    groups = load_groups()
 
     if data.startswith("select_group:"):
         group_id = data.split(":", 1)[1]
-        logger.info(f"[Callback] 选择查看群组，群组ID: {group_id}")
-
-        groups = load_groups()
-        logger.debug(f"[Callback] 当前群组快照: {groups}")
-
         group = groups.get(group_id)
+
         if not group:
-            logger.warning(f"[Callback] 群组 {group_id} 不存在")
-            await query.edit_message_text("⚠️ 群组信息不存在")
+            await query.edit_message_text("⚠️ 群组记录不存在")
             return
 
-        try:
-            start_time = datetime.utcnow()
-            admins = await context.bot.get_chat_administrators(group_id)
-            duration = (datetime.utcnow() - start_time).total_seconds()
-            logger.info(f"[Callback] 获取群组 {group_id} 管理员数: {len(admins)}，耗时: {duration:.2f}s")
+        users = group.get("users", {})
+        if not users:
+            await query.edit_message_text(f"📂 群组：{group['title']}\n⚠️ 暂无非管理员用户记录")
+            return
 
-            text_lines = [
-                f"✅ 群组名称：{group['title']}",
-                f"🆔 群组 ID：{group_id}",
-                "",
-                "管理员列表："
-            ]
-            for admin in admins:
-                u = admin.user
-                name = u.full_name
-                if u.username:
-                    name += f" (@{u.username})"
-                text_lines.append(f"👤 {name}")
+        text_lines = [
+            f"✅ 群组名称：{group['title']}",
+            f"🆔 群组 ID：{group_id}",
+            "",
+            "👥 用户列表："
+        ]
+        for uid, u in users.items():
+            line = f"👤 {u['name']}"
+            if u.get("username"):
+                line += f" (@{u['username']})"
+            text_lines.append(line)
 
-            await query.edit_message_text("\n".join(text_lines))
-            logger.info(f"[Callback] 群组管理员列表发送成功")
+        await query.edit_message_text("\n".join(text_lines))
+        return
 
-        except Exception as e:
-            logger.error(f"[Callback] 获取管理员列表失败: {e}\n{traceback.format_exc()}")
-            await query.edit_message_text(f"⚠️ 获取管理员列表失败：{e}")
-
-    elif data.startswith("delete_group:"):
+    if data.startswith("delete_group:"):
         group_id = data.split(":", 1)[1]
-        logger.info(f"[Callback] 请求删除群组，群组ID: {group_id}")
-
-        groups = load_groups()
         if group_id in groups:
             del groups[group_id]
-            try:
-                with open(GROUP_FILE, "w", encoding="utf-8") as f:
-                    json.dump(groups, f, ensure_ascii=False, indent=2)
-                logger.info(f"[Callback] 群组 {group_id} 记录已删除")
-                await query.edit_message_text(f"✅ 已删除群组记录：{group_id}")
-            except Exception as e:
-                logger.error(f"[Callback] 删除群组文件写入失败: {e}\n{traceback.format_exc()}")
-                await query.edit_message_text(f"⚠️ 删除群组失败：{e}")
+            with open(GROUP_FILE, "w", encoding="utf-8") as f:
+                json.dump(groups, f, ensure_ascii=False, indent=2)
+            await query.edit_message_text(f"✅ 群组记录已删除")
         else:
-            logger.warning(f"[Callback] 删除失败，群组 {group_id} 不存在")
-            await query.edit_message_text("⚠️ 群组不存在或已被删除")
+            await query.edit_message_text("⚠️ 群组记录不存在")
+        return
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 机器人已启动")
 
-async def group_message_listener(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and update.message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        logger.info(f"收到消息：chat_id={update.message.chat.id} user_id={update.effective_user.id} text={update.message.text}")
-        await update_group_info(update)
 
 # 全局缓存用户的最后一次昵称
 last_names = {}
@@ -234,7 +210,35 @@ async def detect_name_change_in_message(update: Update, context: ContextTypes.DE
     # 更新缓存为当前昵称
     last_names[(chat_id, user.id)] = new_name
 
-        
+# 群组普通消息监听器：用于记录非管理员用户
+async def group_message_listener(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message and update.message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        user = update.effective_user
+        chat_id = str(update.message.chat.id)
+        user_id = str(user.id)
+
+        # 先加载现有群组信息
+        groups = load_groups()
+        if chat_id not in groups:
+            groups[chat_id] = {
+                "title": update.message.chat.title,
+                "users": {}
+            }
+
+        # 记录用户信息（管理员也记录）
+        groups[chat_id]["users"][user_id] = {
+            "name": user.full_name,
+            "username": user.username or "",
+            "is_admin": await admin_cache.is_admin(context.bot, update.message.chat.id, user.id)
+        }
+
+        # 保存到文件
+        with open(GROUP_FILE, "w", encoding="utf-8") as f:
+            json.dump(groups, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"已记录用户 {user.full_name} ({user.id}) 到群组 {update.message.chat.title}")
+
+
 # 地址校验
 def is_valid_address(text: str) -> bool:
     pattern = r"^(T[1-9A-HJ-NP-Za-km-z]{33}|0x[a-fA-F0-9]{40})$"
@@ -554,11 +558,16 @@ def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     # 1️⃣ 群组信息监听（优先级最高，保证记录群组）
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_message_listener), group=10)
+    app.add_handler(
+        MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_message_listener),
+        group=10
+    )
+    # 成员加入或退出
+    app.add_handler(ChatMemberHandler(update_group_info, ChatMemberHandler.CHAT_MEMBER))
 
     # 注册用户标记功能
     register_marked_users_handlers(app)
-    
+
     # 2️⃣ 注册命令
     app.add_handler(MessageHandler(filters.Regex("^下课$"), handle_class_end))
     app.add_handler(MessageHandler(filters.Regex("^上课$"), handle_class_start))

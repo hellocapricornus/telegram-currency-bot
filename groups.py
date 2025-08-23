@@ -20,33 +20,36 @@ def load_groups():
         logger.error(f"读取群组数据失败: {e}")
         return {}
 
-async def update_group_info(update, context=None):
-    """异步更新群组信息（群名或类型）"""
+# 在 update_group_info 内增加成员信息
+async def update_group_info(update: Update):
+    groups = load_groups()
     chat = update.effective_chat
-    if chat.type not in ["group", "supergroup"]:
+    user = update.effective_user
+
+    if not chat or not user:
         return
 
-    groups = load_groups()
     group_id = str(chat.id)
-
-    # 如果群组不存在，或群名称、类型发生变化则更新
-    if (group_id not in groups or
-        groups[group_id].get("title") != chat.title or
-        groups[group_id].get("type") != chat.type):
-
+    if group_id not in groups:
         groups[group_id] = {
             "title": chat.title,
-            "type": chat.type
+            "users": {}
         }
-        try:
-            with open(GROUP_FILE, "w", encoding="utf-8") as f:
-                json.dump(groups, f, ensure_ascii=False, indent=2)
-            logger.info(f"✅ 群组信息已更新: {chat.title} ({chat.id})")
-        except Exception as e:
-            logger.error(f"写入群组信息失败: {e}")
 
-    # 🔍 调试：打印当前所有群组
-    logger.debug(f"[调试] 当前群组缓存: {json.dumps(groups, ensure_ascii=False, indent=2)}")
+    # 记录用户
+    if user.id not in groups[group_id]["users"]:
+        groups[group_id]["users"][user.id] = {
+            "name": user.full_name,
+            "username": user.username,
+            "joined": datetime.utcnow().isoformat()
+        }
+    else:
+        # 更新用户名（防止改名）
+        groups[group_id]["users"][user.id]["name"] = user.full_name
+        groups[group_id]["users"][user.id]["username"] = user.username
+
+    save_groups(groups)
+
 
 def delete_group(group_id: str):
     """删除指定群组ID的记录"""

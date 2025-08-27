@@ -28,7 +28,12 @@ from telegram.ext import (
 from groups import delete_group  # 新增导入
 from telegram.constants import ChatType #新加
 from groups import load_groups, update_group_info #新加
-from handlers.exchange_rate import handle_exchange_rate, handle_exchange_rate_input
+from handlers.exchange_rate import (
+    handle_scam_check,
+    handle_scam_address_input,
+    handle_add_scam,
+    handle_del_scam,
+)
 from handlers.address import handle_address_input, button_callback as address_button_callback
 from handlers.bookkeeper import (
     handle_bookkeeping_start,
@@ -63,7 +68,7 @@ GROUP_FILE = "data/groups.json"
 
 # 配置常量
 BUTTONS = [
-    ["🧾 开始记账", "📈 点位对比", "💹 实时U价"],
+    ["🧾 开始记账", "📈 点位对比", "🛡 地址防诈"],
     ["💰 地址查询", "🤝 交易查询", "💎 代开会员"],
     ["📥 商务联系", "📢 群发助手", "📊 互转分析"],
 ]
@@ -344,9 +349,9 @@ async def check_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bo
 
 STATE_HANDLERS = {
     "awaiting_price_compare": handle_price_compare,
-    "awaiting_exchange_currency": handle_exchange_rate_input,
     "awaiting_contact_addresses": handle_contact_input,
     "awaiting_tx_addresses": handle_transaction_input,
+    "awaiting_scam_address": handle_scam_address_input,   # 🆕 地址防诈
 }
 
 async def is_user_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -436,8 +441,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        if text == "💹 实时U价":
-            await handle_exchange_rate(update, context)
+        if text == "🛡 地址防诈":
+            await handle_scam_check(update, context)
             return
 
         if text == "💰 地址查询":
@@ -644,6 +649,9 @@ def main():
 
     # 关键词屏蔽
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), anti_ads.detect_and_delete_ads), group=2)
+    app.add_handler(CommandHandler("add_scam", handle_add_scam))
+    app.add_handler(CommandHandler("del_scam", handle_del_scam))
+
 
     # 其他普通消息
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1)

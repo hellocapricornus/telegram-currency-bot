@@ -33,7 +33,7 @@ bookkeeping_data = {}
 # ----- 缓存文件操作 -----
 def now_beijing():
     return datetime.now(timezone.utc) + timedelta(hours=8)
-    
+
 def get_cache_path(chat_id):
     return os.path.join(CACHE_DIR, f"{chat_id}.json")
 
@@ -109,7 +109,7 @@ async def handle_class_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     permissions = ChatPermissions(can_send_messages=True)  # 允许发言
     await context.bot.set_chat_permissions(chat_id=chat_id, permissions=permissions)
     await update.message.reply_text("🔓 全群已解除禁言，上课啦！")
-    
+
 # 启动记账命令
 async def handle_bookkeeping_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.effective_chat.type
@@ -133,8 +133,8 @@ async def handle_bookkeeping_start(update: Update, context: ContextTypes.DEFAULT
         "active": True,
         "in": [],
         "out": [],
-        "rate": None,
-        "fee": None,
+        "rate": 1.0,
+        "fee": 0.0,
         "operator_usernames": bookkeeping_data.get(chat_id, {}).get("operator_usernames", []),
     }
     await update.message.reply_text("✅ 已开始记账。请设置汇率和费率后再输入入款记录。")
@@ -331,8 +331,8 @@ async def handle_save_bill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bookkeeping_data[chat_id].update({
         "in": [],
         "out": [],
-        "rate": None,
-        "fee": None,
+        "rate": 1.0,
+        "fee": 0.0,
         "active": False,
     })
 
@@ -500,17 +500,18 @@ async def handle_bill_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("\n入款记录:")
     for rec in data.get("in", []):
         usdt_val = calculate_usdt(rec["amount"], rec.get("fee", 0), rec.get("rate"))
-        lines.append(f"{rec['time']}  +{rec['amount']:.2f} (汇率: {rec.get('rate', 'N/A')} 费率: {rec.get('fee', 'N/A')}%)  ≈ {usdt_val:.2f} USDT")
+        lines.append(
+            f"{rec['time']} +{rec['amount']:.2f} ({rec.get('rate', 'N/A')}/{rec.get('fee', 'N/A')}%) ≈ {usdt_val:.2f} USDT"
+        )
 
     lines.append("\n下发记录:")
     for rec in data.get("out", []):
-        if rec.get("is_usdt", False):
-            lines.append(f"{rec['time']}  -{rec['amount']:.2f} | {rec['usdt_amount']:.2f} USDT")
-        else:
+        usdt_val = rec.get("usdt_amount")
+        if usdt_val is None:
             fee = data.get("fee", 0)
             rate = data.get("rate", 1)
             usdt_val = calculate_usdt(rec["amount"], fee, rate)
-            lines.append(f"{rec['time']}  -{rec['amount']:.2f} | {usdt_val:.2f} USDT")
+        lines.append(f"{rec['time']} -{usdt_val:.2f} USDT")
 
     lines.append(f"\n默认费率: {data.get('fee', 0):.2f}%")
     lines.append(f"默认汇率: {data.get('rate', 0) if data.get('rate') is not None else '未设置'}")
@@ -668,17 +669,18 @@ async def render_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"入款({len(deposit_records)}笔)")
     for rec in deposit_records:
         usdt_val = calculate_usdt(rec["amount"], rec.get("fee", 0), rec.get("rate"))
-        lines.append(f"{rec['time']}  +{rec['amount']:.2f} (汇率: {rec.get('rate', 'N/A')} 费率: {rec.get('fee', 'N/A')}%)  ≈ {usdt_val:.2f} USDT")
+        lines.append(
+            f"{rec['time']} +{rec['amount']:.2f} ({rec.get('rate', 'N/A')}/{rec.get('fee', 'N/A')}%) ≈ {usdt_val:.2f} USDT"
+        )
 
     lines.append(f"\n下发({len(payout_records)}笔)")
     for rec in payout_records:
-        if rec.get("is_usdt", False):
-            lines.append(f"{rec['time']}  -{rec['amount']:.2f} | {rec['usdt_amount']:.2f}USDT")
-        else:
+        usdt_val = rec.get("usdt_amount")
+        if usdt_val is None:  # 没有直接存 USDT，就重新算
             fee = data.get("fee", 0)
             rate = data.get("rate", 1)
             usdt_val = calculate_usdt(rec["amount"], fee, rate)
-            lines.append(f"{rec['time']}  -{rec['amount']:.2f} | {usdt_val:.2f}USDT")
+        lines.append(f"{rec['time']} -{usdt_val:.2f} USDT")
 
     lines.append(f"\n默认费率: {data.get('fee', 0):.2f}%")
     lines.append(f"默认汇率: {data.get('rate', 0) if data.get('rate') is not None else '未设置'}")

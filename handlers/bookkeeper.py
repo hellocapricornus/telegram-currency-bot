@@ -2,6 +2,7 @@ import os
 import re
 import json
 import math
+import logging
 from datetime import datetime, timezone, timedelta
 from telegram import (
     Update,
@@ -20,6 +21,8 @@ from telegram.ext import (
     filters,
 )
 from telegram.constants import ChatMemberStatus
+
+logger = logging.getLogger(__name__)
 
 # 初始化目录
 HISTORY_DIR = "data/bills"
@@ -796,3 +799,51 @@ async def handle_query_bill_message(update: Update, context: ContextTypes.DEFAUL
     buttons.append([InlineKeyboardButton("全部账单", callback_data="bill_list:all:0")])
     markup = InlineKeyboardMarkup(buttons)
     await update.message.reply_text("📅 请选择年份查看账单：", reply_markup=markup)
+
+# ========== 计算功能 ==========
+async def handle_calculation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    logger.info(f"🧮 进入计算模块: {text}")
+
+    # 支持半角 + - * / 和全角 ＋ － × ÷
+    pattern = r"^\s*(-?\d+(?:\.\d+)?)\s*([+\-*/＋－×÷])\s*(-?\d+(?:\.\d+)?)\s*$"
+    match = re.match(pattern, text)
+    if not match:
+        logger.info("❌ 正则未匹配成功")
+        return  # 不符合格式则跳过
+
+    num1 = float(match.group(1))
+    op = match.group(2)
+    num2 = float(match.group(3))
+
+    try:
+        if op in ["＋", "+"]:
+            result = num1 + num2
+            display_op = "+"
+        elif op in ["－", "-"]:
+            result = num1 - num2
+            display_op = "-"
+        elif op in ["×", "*"]:
+            result = num1 * num2
+            display_op = "*"
+        elif op in ["÷", "/"]:
+            if num2 == 0:
+                await update.message.reply_text("❌ 除数不能为 0")
+                return
+            result = num1 / num2
+            display_op = "/"
+        else:
+            logger.warning("⚠️ 未知运算符")
+            return
+
+        # 如果结果是整数，显示整数；否则保留 4 位小数
+        if result.is_integer():
+            result_str = str(int(result))
+        else:
+            result_str = f"{result:.4f}"
+
+        await update.message.reply_text(f"🧮 计算结果: {num1} {display_op} {num2} = {result_str}")
+
+    except Exception as e:
+        logger.exception("计算出错")
+        await update.message.reply_text(f"计算出错: {e}")

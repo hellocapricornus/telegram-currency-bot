@@ -2,6 +2,9 @@ import os
 import re
 import json
 import math
+import ast
+import operator as op
+import logging
 from datetime import datetime, timezone, timedelta
 from telegram import (
     Update,
@@ -20,6 +23,8 @@ from telegram.ext import (
     filters,
 )
 from telegram.constants import ChatMemberStatus
+
+logger = logging.getLogger(__name__)
 
 # 初始化目录
 HISTORY_DIR = "data/bills"
@@ -796,3 +801,77 @@ async def handle_query_bill_message(update: Update, context: ContextTypes.DEFAUL
     buttons.append([InlineKeyboardButton("全部账单", callback_data="bill_list:all:0")])
     markup = InlineKeyboardMarkup(buttons)
     await update.message.reply_text("📅 请选择年份查看账单：", reply_markup=markup)
+
+# ========== 计算功能 ==========
+import re
+import ast
+import operator as op
+import logging
+from telegram import Update
+from telegram.ext import ContextTypes
+
+logger = logging.getLogger(__name__)
+
+# 安全运算符映射
+operators = {
+    ast.Add: op.add,
+    ast.Sub: op.sub,
+    ast.Mult: op.mul,
+    ast.Div: op.truediv,
+    ast.USub: op.neg,
+}
+
+def safe_eval(expr: str):
+    """安全计算表达式"""
+    # 替换全角运算符为半角
+    expr = expr.replace("＋", "+").replace("－", "-").replace("×", "*").replace("÷", "/")
+    node = ast.parse(expr, mode='eval').body
+
+    def _eval(node):
+        if isinstance(node, ast.Constant):
+            return node.value
+        elif isinstance(node, ast.Num):
+            return node.n
+        elif isinstance(node, ast.BinOp):
+            left = _eval(node.left)
+            right = _eval(node.right)
+            return operators[type(node.op)](left, right)
+        elif isinstance(node, ast.UnaryOp):
+            return operators[type(node.op)](_eval(node.operand))
+        else:
+            raise ValueError("不支持的表达式")
+    return _eval(node)
+
+# 支持数字、运算符、括号和空格，但至少有一个运算符
+calc_pattern = re.compile(r"^\s*[-+]?(\d+(\.\d+)?|\([^\)]+\))(\s*[-+*/＋－×÷]\s*[-+]?(\d+(\.\d+)?|\([^\)]+\)))+\s*$")
+
+# 屏蔽记账命令关键字
+blocked_keywords = ["入款", "下发", "设置汇率", "设置费率", "添加操作人", "删除操作人", "保存账单", "结束记账"]
+
+async def handle_calculation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    logger.info(f"🧮 进入计算模块: {text}")
+
+    # 忽略记账相关命令
+    if any(k in text for k in blocked_keywords):
+        logger.info("⛔ 忽略记账命令")
+        return
+
+    # 不符合计算正则则跳过
+    if not calc_pattern.fullmatch(text):
+        logger.info("❌ 不是合法计算表达式")
+        return
+
+    try:
+        result = safe_eval(text)
+        # 整数显示整数，浮点数保留 4 位小数
+        if isinstance(result, float) and result.is_integer():
+            result_str = str(int(result))
+        else:
+            result_str = f"{result:.4f}"
+
+        await update.message.reply_text(f"🧮 计算结果: {text} = {result_str}")
+
+    except Exception as e:
+        logger.warning(f"计算出错: {text} | {e}")
+        await update.message.reply_text(f"❌ 计算出错: {e}")

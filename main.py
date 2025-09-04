@@ -41,6 +41,7 @@ from handlers.bookkeeper import (
     handle_class_start,
     handle_class_end,
     handle_query_bill_message,
+    handle_calculation,
 )
 from handlers.compare_price import handle_price_compare
 from handlers.transaction import (
@@ -657,6 +658,9 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message), group=1)
     app.add_handler(CallbackQueryHandler(handle_group_users_callback, pattern=r"^(select_group|delete_group):"))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
+
+    # 最后加计算功能（必须放最后，避免覆盖其他逻辑）
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_calculation), group=99)
 
     # 设置命令菜单
     app.post_init = set_commands
